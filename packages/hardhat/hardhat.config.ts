@@ -5,6 +5,7 @@ import "@nomicfoundation/hardhat-toolbox";
 import "hardhat-deploy";
 import "@matterlabs/hardhat-zksync-solc";
 import "@matterlabs/hardhat-zksync-verify";
+import "hardhat-watcher";
 
 // If not set, it uses ours Alchemy's default API key.
 // You can get your own at https://dashboard.alchemyapi.io
@@ -134,6 +135,25 @@ const config: HardhatUserConfig = {
   verify: {
     etherscan: {
       apiKey: `${etherscanApiKey}`,
+    },
+  },
+  watcher: {
+    compilation: {
+      tasks: ["compile"],
+      files: ["./contracts"],
+      ignoredFiles: ["**/.vscode"],
+      verbose: true,
+      clearOnStart: true,
+      start: "echo Running my compilation task now..",
+    },
+    test: {
+      tasks: ["compile", { command: "test", params: { compile: true, testFiles: ["{path}"] } }],
+      // tasks: ["compile", { command: "test", params: { compile: true, testFiles: ["test/polls.test.ts"] } }],
+      files: ["./test/**/*"],
+      ignoredFiles: ["**/.vscode"],
+      verbose: true,
+      clearOnStart: true,
+      start: "yarn compile",
     },
   },
 };

@@ -11,7 +11,17 @@ import { notification } from "~~/utils/scaffold-eth";
 const FAUCET_ACCOUNT_INDEX = 0;
 
 const localWalletClient = createWalletClient({
-  chain: hardhat,
+  chain: {
+    ...hardhat,
+    rpcUrls: {
+      default: {
+        http: ["http://127.0.0.1:8547"],
+      },
+      public: {
+        http: ["http://127.0.0.1:8547"],
+      },
+    },
+  },
   transport: http(),
 });
 

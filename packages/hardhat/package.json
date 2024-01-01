@@ -11,12 +11,14 @@
     "lint": "eslint --config ./.eslintrc.json --ignore-path ./.eslintignore ./*.ts ./deploy/**/*.ts ./scripts/**/*.ts ./test/**/*.ts",
     "lint-staged": "eslint --config ./.eslintrc.json --ignore-path ./.eslintignore",
     "test": "REPORT_GAS=true hardhat test --network hardhat",
-    "verify": "hardhat etherscan-verify"
+    "verify": "hardhat etherscan-verify",
+    "test:watch": "hardhat watch test --network hardhat"
   },
   "dependencies": {
     "@openzeppelin/contracts": "~4.8.1",
     "dotenv": "~16.0.3",
     "envfile": "~6.18.0",
+    "hardhat-watcher": "^2.5.0",
     "qrcode": "~1.5.1"
   },
   "devDependencies": {

@@ -1,159 +1,181 @@
-import React, { useEffect } from "react";
-import { useRouter } from "next/router";
-import { ImpersonatorIframe, useImpersonatorIframe } from "@impersonator/iframe";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Address, Balance } from "../components/scaffold-eth";
+import { bufferToBase64URLString, startRegistration } from "@simplewebauthn/browser";
 import type { NextPage } from "next";
-import { useDebounce } from "usehooks-ts";
+import { QRCodeSVG } from "qrcode.react";
+import toast from "react-hot-toast";
+import { useLocalStorage } from "usehooks-ts";
+import { useAccount } from "wagmi";
 import { MetaHeader } from "~~/components/MetaHeader";
-import { AddressInput, InputBase } from "~~/components/scaffold-eth";
-import { getTargetNetworks } from "~~/utils/scaffold-eth";
-
-// const possibleNetworks = [
-//   { name: "mainnet", rpcUrl: "https://cloudflare-eth.com" },
-//   { name: "optimism", rpcUrl: " https://mainnet.optimism.io" },
-// ];
+import { useScaffoldContractRead, useScaffoldContractWrite, useScaffoldEventHistory } from "~~/hooks/scaffold-eth";
 
 const Home: NextPage = () => {
-  const router = useRouter();
-  const { address, networkName, url } = router.query;
-  const { latestTransaction } = useImpersonatorIframe();
-  const targetNetworks = getTargetNetworks();
-  // i think eventually we want   const [impersonateAddress, setImpersonateAddress] = useLocalStorage<string>("impersonateAddress", "");
-  const [impersonateAddress, setImpersonateAddress] = React.useState<string>(address as string);
+  const { isConnected, address } = useAccount();
+  const [currentPublicKey, setCurrentPublicKey] = useState("");
+  const [walletWebAuthData, setWalletWebAuthData] = useLocalStorage<any>("walletWebAuthData", {});
 
-  //const prevSelectedNetwork = possibleNetworks.find(network => network.name === networkName);
-  const [selectedNetwork, setSelectedNetwork] = React.useState<any>();
-  //prevSelectedNetwork ? prevSelectedNetwork : undefined,
-  const [appUrl, setAppUrl] = React.useState<string>(
-    // "https://app.uniswap.org/swap?chain=mainnet&inputAmount=1&outputCurrency=0x6b175474e89094c44da98b954eedeac495271d0f&inputCurrency=0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-    "",
-  );
+  // const { data: tokenBalance } = useScaffoldContractRead({
+  //   contractName: "WalletToken",
+  //   functionName: "balanceOf",
+  //   args: [address],
+  // });
 
-  const debounceImpersonateAddress = useDebounce(impersonateAddress, 1000);
-  const debounceSelectedNetworkName = useDebounce(selectedNetwork, 500);
-  const debounceAppUrl = useDebounce(appUrl, 500);
+  const { data: token } = useScaffoldContractRead({
+    contractName: "WalletToken",
+    functionName: "tokenID",
+  });
+  const { data: hashKey } = useScaffoldContractRead({
+    contractName: "WalletToken",
+    functionName: "getTransactionHash",
+    args: [currentPublicKey],
+  });
+  const { data: TokenBoundEvent } = useScaffoldEventHistory({
+    contractName: "WalletToken",
+    eventName: "TokenBound",
+    fromBlock: BigInt(0),
+    transactionData: true,
+    receiptData: true,
+    watch: true,
+  });
+  const { writeAsync: writeAsyncMint } = useScaffoldContractWrite({
+    contractName: "WalletToken",
+    functionName: "mint",
+    args: [] as any,
+  });
 
-  const handleAppUrlChange = (newValue: string) => {
-    setAppUrl(newValue);
-  };
-
-  const handleAddressChange = (newValue: string) => {
-    setImpersonateAddress(newValue);
-  };
-
-  // capture address,network and app url on debounce
-  useEffect(() => {
-    if (Boolean(debounceImpersonateAddress)) {
-      router.push({
-        pathname: router.pathname,
-        query: {
-          ...router.query,
-          address: debounceImpersonateAddress,
-          networkName: selectedNetwork ? selectedNetwork : "https://cloudflare-eth.com",
+  const onCreateWallet = async () => {
+    try {
+      // generate options
+      const response = await fetch("/api/generateAuth", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
+        body: JSON.stringify({
+          type: "register",
+          rpID: window.location.hostname,
+          userID: `${token?.toString()}@${address}`,
+          userName: `walletId-${token?.toString()}`,
+        }),
       });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const registerData = await response.json();
+      // register
+      const authResponse = await startRegistration(registerData.options);
+      // verify registration
+      const verifyResponse = await fetch("/api/verifyAuth", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          type: "register",
+          authResponse: authResponse,
+          expectedChallenge: registerData.options.challenge,
+          rpID: window.location.hostname,
+          expectedOrigin: window.location.origin,
+        }),
+      });
+      const verifyResponseData = await verifyResponse.json();
+      // verify registration
+      if (verifyResponseData.verification.verified) {
+        // setCurrentPublicKey(authResponse.response.publicKey as string);
+        const { credentialPublicKey, credentialID, counter } = verifyResponseData.verification.registrationInfo;
+        const currentWalletAuthData = {
+          credentialPublicKey: credentialPublicKey,
+          credentialID: credentialID,
+          counter,
+          transports: authResponse.response.transports,
+        };
+        const tokenId = token?.toString() ? +token?.toString() : 0;
+        setWalletWebAuthData({ ...walletWebAuthData, [tokenId]: currentWalletAuthData } as any);
+
+        const pubKeyStr = bufferToBase64URLString(
+          new Uint8Array(Object.values(currentWalletAuthData.credentialPublicKey) as any),
+        );
+        setCurrentPublicKey(pubKeyStr as string);
+      } else {
+        toast.error("Error in registration");
+      }
+    } catch (error) {
+      toast.error("Error in registration");
     }
-  }, [debounceImpersonateAddress]);
+  };
+
+  const onMint = async (currentPublicKey: string, hashKey: string) => {
+    await writeAsyncMint({ args: [hashKey] });
+  };
 
   useEffect(() => {
-    if (Boolean(debounceAppUrl)) {
-      router.push({
-        pathname: router.pathname,
-        query: { ...router.query, url: appUrl },
-      });
+    if (currentPublicKey !== "" && hashKey !== undefined) {
+      onMint(currentPublicKey, hashKey as string);
     }
-  }, [debounceAppUrl]);
+  }, [currentPublicKey, hashKey]);
 
-  useEffect(() => {
-    if (Boolean(debounceSelectedNetworkName)) {
-      router.push({
-        pathname: router.pathname,
-        query: { ...router.query, networkName: selectedNetwork ? selectedNetwork : "https://cloudflare-eth.com" },
-      });
-    }
-  }, [debounceSelectedNetworkName]);
-
-  // set default values on new page reload
-  useEffect(() => {
-    if (address !== undefined) {
-      setImpersonateAddress(address as string);
-    }
-    if (networkName !== undefined) {
-      setSelectedNetwork(networkName);
-    }
-    if (url !== undefined) {
-      setAppUrl(url as string);
-    }
-  }, [address, networkName, url]);
-
+  // filter out user tokens
+  const userTokens = TokenBoundEvent?.filter(token => token?.args?.owner === address)
+    .map(token => {
+      return { tokenId: token?.args?.tokenId?.toString(), wallet: token?.args?.wallet, hashKey: token?.args?.hashKey };
+    })
+    .sort((a: any, b: any) => {
+      return parseInt(a.tokenId) - parseInt(b.tokenId);
+    });
   return (
     <>
       <MetaHeader />
       <div className="flex flex-col items-center justify-center p-8">
-        <h1 className="text-2xl font-bold">impersonate</h1>
-        <AddressInput value={impersonateAddress} placeholder="vitalik.eth" onChange={handleAddressChange} />
-        <h1 className="text-2xl font-bold">at</h1>
-        <div className="w-[400px]">
-          <InputBase placeholder="https://app.uniswap.org/swap" value={appUrl} onChange={handleAppUrlChange} />
-        </div>
-        <h1 className="text-2xl font-bold">on</h1>
-        <div className="w-[200px]">
-          <select
-            key={selectedNetwork}
-            className="select select-bordered w-full max-w-xs "
-            defaultValue={selectedNetwork ? selectedNetwork : ""}
-            value={selectedNetwork}
-            onChange={e => {
-              setSelectedNetwork(targetNetworks[e.target.selectedIndex].rpcUrls.default.http[0]);
-            }}
-          >
-            {targetNetworks.map((network: any) => {
-              return (
-                <option key={network.name} value={network.rpcUrls.default.http[0]}>
-                  {network.name}
-                </option>
-              );
-            })}
-          </select>{" "}
-        </div>
-      </div>
-      <div className="flex items-center flex-col flex-grow p-4 rounded-md">
-        <div
-          className={`${Boolean(debounceImpersonateAddress) && "border-2 border-gray-200"} rounded-md  w-full h-full`}
-        >
-          {debounceImpersonateAddress && (
-            <div>
-              {selectedNetwork && debounceImpersonateAddress && appUrl ? (
-                <div className="w-full rounded-md p-1">
-                  <ImpersonatorIframe
-                    key={selectedNetwork + debounceImpersonateAddress + appUrl}
-                    height={"1200px"}
-                    width={"100%"} //set it to the browser width
-                    src={appUrl}
-                    address={debounceImpersonateAddress}
-                    rpcUrl={selectedNetwork}
-                  />
-                </div>
-              ) : (
-                ""
-              )}
-            </div>
-          )}
-        </div>
+        {isConnected === false && (
+          <>
+            <div>Connect with wallet</div>
+          </>
+        )}
+        {isConnected && (
+          <>
+            <div className="flex flex-col justify-center items-center w-full lg:w-3/4 xl:w-1/2">
+              <button className="btn btn-primary mb-4" onClick={onCreateWallet}>
+                Mint nft wallet
+              </button>
+              <div>Nft Bound wallets</div>
+              <div className="w-full lg:w-2/3 xl:w-1/2">
+                {userTokens?.map(token => (
+                  <div key={token.tokenId} className="card bg-base-100 shadow-xl w-full m-2">
+                    <div>
+                      <div className="card-body">
+                        <div className="flex flex-col lg:flex-row justify-start items-center">
+                          <QRCodeSVG
+                            className="rounded-2xl w-50 lg:w-auto mb-4 lg:mb-0"
+                            size={200}
+                            value={token.wallet as string}
+                          ></QRCodeSVG>
 
-        <div className="p-4">
-          {latestTransaction ? (
-            <>
-              <h1 className="text-xl font-bold mb-2">Latest transaction:</h1>
-              <div className="p-2 bg-gray-800 text-white rounded-md overflow-auto">
-                <pre className="font-mono text-sm">
-                  <code>{JSON.stringify(latestTransaction, null, 2)}</code>
-                </pre>
+                          <div className="m-2">
+                            <div className="ml-2">Token id - {token.tokenId}</div>
+                            <div className="ml-2">
+                              <Address address={token.wallet} disableAddressLink />
+                            </div>
+                            <Balance address={token.wallet} />
+                          </div>
+                        </div>
+
+                        <div className="card-actions justify-end">
+                          {/* <button className="btn btn-primary">View</button> */}
+                          <Link href={`/wallet/${token.tokenId}/${token.wallet}`}>
+                            <button className="btn btn-primary">View</button>
+                          </Link>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
-            </>
-          ) : (
-            ""
-          )}
-        </div>
+            </div>
+          </>
+        )}
       </div>
     </>
   );

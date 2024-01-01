@@ -10,7 +10,17 @@ const NUM_OF_ETH = "1";
 const FAUCET_ADDRESS = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 
 const localWalletClient = createWalletClient({
-  chain: hardhat,
+  chain: {
+    ...hardhat,
+    rpcUrls: {
+      default: {
+        http: ["http://127.0.0.1:8547"],
+      },
+      public: {
+        http: ["http://127.0.0.1:8547"],
+      },
+    },
+  },
   transport: http(),
 });
 
