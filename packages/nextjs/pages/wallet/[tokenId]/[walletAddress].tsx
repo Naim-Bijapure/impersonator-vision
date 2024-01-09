@@ -348,4 +348,5 @@ const WalletPage: NextPage = () => {
   );
 };
 
+
 export default WalletPage;
