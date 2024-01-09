@@ -24,8 +24,8 @@ const scaffoldConfig = {
     //     },
     //   },
     // },
-    chains.mainnet,
     chains.sepolia,
+    chains.mainnet,
   ],
 
   // The interval at which your front-end polls the RPC servers for new data

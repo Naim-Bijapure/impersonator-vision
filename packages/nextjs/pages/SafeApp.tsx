@@ -47,14 +47,15 @@ const SafeApp: NextPage = () => {
             value={amount}
           />
           <button
-            className={`w-full p-2  bg-blue-500 rounded ${
+            className={`w-full p-2  bg-blue-500 rounded btn btn-primary ${
               isLoading || !sendTransaction || !to || !amount ? "opacity-50 cursor-not-allowed" : "hover:bg-blue-600"
             }`}
             type="submit"
-            disabled={isLoading || !sendTransaction || !to || !amount}
+            // disabled={isLoading || !sendTransaction || !to || !amount}
           >
             {isLoading ? "Sending..." : "Send"}
           </button>
+
           {isSuccess && (
             <div className="text-green-500">
               Successfully sent {amount} ether to {to}

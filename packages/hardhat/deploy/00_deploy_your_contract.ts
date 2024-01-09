@@ -40,7 +40,7 @@ const deployYourContract: DeployFunction = async function (hre: HardhatRuntimeEn
 
   let REGISTRY_ADDRESS = "";
   let IMPLEMENTATION_ADDRESS = "";
-  if (+chainId === 11155111) {
+  if (+chainId === 11155111 || +chainId === 31337) {
     const registry = await deploy("ERC6551Registry", {
       from: deployer,
       // Contract constructor arguments

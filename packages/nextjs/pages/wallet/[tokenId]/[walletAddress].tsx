@@ -5,6 +5,7 @@ import { ethers } from "ethers";
 import { NextPage } from "next";
 import { QRCodeSVG } from "qrcode.react";
 import toast from "react-hot-toast";
+import { useAccount } from "wagmi";
 import {
   ArrowsRightLeftIcon as SendIcon,
   ArrowTopRightOnSquareIcon as TransferIcon,
@@ -13,10 +14,18 @@ import { AddressVisionImpersonator } from "~~/components/AddressVisionImpersonat
 import { Impersonator } from "~~/components/Impersonator";
 import { Address, AddressInput, Balance, EtherInput, InputBase } from "~~/components/scaffold-eth";
 import { useScaffoldContractRead, useScaffoldContractWrite } from "~~/hooks/scaffold-eth";
+import { ERC6551Account, TxnNotification, WalletToken, getPrivateKey } from "~~/pages";
+import scaffoldConfig from "~~/scaffold.config";
+import { notification } from "~~/utils/scaffold-eth";
 
 const WalletPage: NextPage = () => {
+  const { isConnected } = useAccount();
+
   const router = useRouter();
   const { tokenId, walletAddress } = router.query;
+
+  const [signer, setSigner] = useState<any>(undefined);
+  const [provider, setProvider] = useState<any>(undefined);
 
   const [recipient, setRecipent] = useState<string>("");
   const [amount, setAmount] = useState<string>("");
@@ -24,9 +33,15 @@ const WalletPage: NextPage = () => {
   const [currentPublicKey, setCurrentPublicKey] = useState("");
 
   let walletWebAuthData: any;
+  let virtualAddress: any;
+  let publicKey: any;
   if (typeof window !== "undefined") {
     walletWebAuthData = JSON.parse(localStorage.getItem("walletWebAuthData") || "{}");
-    walletWebAuthData = walletWebAuthData[tokenId as string];
+    virtualAddress = JSON.parse(localStorage.getItem("virtualAddress") || "");
+    publicKey = JSON.parse(localStorage.getItem("publicKey") || "");
+    if (isConnected) {
+      walletWebAuthData = walletWebAuthData[tokenId as string];
+    }
   }
 
   const { data: hashKey } = useScaffoldContractRead({
@@ -47,6 +62,7 @@ const WalletPage: NextPage = () => {
   });
 
   const onWebAuthTx = async () => {
+    const toastId = toast.loading("Executing transaction");
     try {
       // generate auth data
       const response = await fetch("/api/generateAuth", {
@@ -66,8 +82,8 @@ const WalletPage: NextPage = () => {
 
       const authData = await response.json();
       const authResponse = await startAuthentication(authData.options);
-      // verify auth
 
+      // verify auth
       const verifyResponse = await fetch("/api/verifyAuth", {
         method: "POST",
         headers: {
@@ -89,33 +105,98 @@ const WalletPage: NextPage = () => {
       }
 
       const verifyData = await verifyResponse.json();
-      console.log(`onWebAuthTx => verifyData:`, verifyData);
-      // get a public key string
-      const pubKeyStr = bufferToBase64URLString(
-        new Uint8Array(Object.values(walletWebAuthData.credentialPublicKey) as any),
-      );
+      if (tokenHashKey !== "false" && isConnected && verifyData.verification.verified) {
+        // get a public key string
+        const pubKeyStr = bufferToBase64URLString(
+          new Uint8Array(Object.values(walletWebAuthData.credentialPublicKey) as any),
+        );
 
-      setCurrentPublicKey(pubKeyStr);
+        setCurrentPublicKey(pubKeyStr);
+      }
+      if (tokenHashKey === "false" && isConnected && verifyData.verification.verified) {
+        setCurrentPublicKey(tokenHashKey);
+      }
+
+      // on sign in pass key flow
+      if (isConnected === false && verifyData.verification.verified) {
+        // const pubKey = bufferToBase64URLString(
+        //   new Uint8Array(Object.values(walletWebAuthData.credentialPublicKey) as any),
+        // );
+
+        // const walletResponse = await fetch("/api/wallet", {
+        //   method: "POST",
+        //   headers: {
+        //     "Content-Type": "application/json",
+        //   },
+        //   body: JSON.stringify({
+        //     type: WALLET_TYPES.EXECUTE,
+        //     pubKey: pubKey,
+        //     amount,
+        //     tokenId: tokenId,
+        //     callData: Boolean(callData) ? callData : "0x",
+        //   }),
+        // });
+        // if (!walletResponse.ok) {
+        //   toast.dismiss(toastId);
+        //   toast.error("Error in tx execution");
+        //   throw new Error(`HTTP error! status: ${walletResponse.status}`);
+        // }
+
+        // toast.dismiss(toastId);
+        // const walletData = await walletResponse.json();
+        // notification.success(<TxnNotification message="Tx executed at" blockExplorerLink={walletData.blockUrl} />);
+        // (document.getElementById("sentModal") as any)?.close();
+
+        // FE EXECUTION
+
+        const walletToken = new ethers.Contract(WalletToken.address, WalletToken.abi, signer);
+
+        const boundWalletAddress = await walletToken.tokenBoundWalletAddress(tokenId);
+
+        const boundWallet = new ethers.Contract(boundWalletAddress, ERC6551Account.abi, signer);
+        const boundWalletBalance = await provider.getBalance(boundWallet.address);
+        if (boundWalletBalance.gt(0) === false) {
+          notification.error("Wallet balance is 0");
+        }
+
+        const hashKey = await walletToken.getTransactionHash(publicKey);
+
+        const executeTx = await boundWallet.execute(
+          recipient,
+          ethers.utils.parseEther("" + parseFloat(amount).toFixed(12)) as any,
+          Boolean(callData) ? callData : "0x",
+          hashKey,
+          {
+            gasLimit: 999999,
+          },
+        );
+        const executeRcpt = await executeTx.wait();
+        const network = await provider.getNetwork();
+        const networkName = network.name === "homestead" ? "mainnet" : network.name;
+
+        const blockUrl = `https://${networkName}.etherscan.io/tx/${executeRcpt.transactionHash}`;
+        toast.dismiss(toastId);
+        notification.success(<TxnNotification message="Tx executed at" blockExplorerLink={blockUrl} />);
+      }
     } catch (error) {
+      toast.dismiss(toastId);
       toast.error("Error authenticating");
     }
   };
 
   const onExecute = async (currentPublicKey: string, hashKey: string) => {
-    console.log(`n-🔴 => onExecute => hashKey:`, hashKey, tokenHashKey);
-    if (hashKey !== tokenHashKey) {
+    if (hashKey !== tokenHashKey && tokenHashKey !== "false") {
       toast.error("authentication failed");
       return;
     }
 
-    console.log(`n-🔴 => onExecute => Boolean(callData) ? callData : "0x":`, Boolean(callData) ? callData : "0x");
     // EXECUTE
     await writeAsyncExecute({
       args: [
         recipient,
         ethers.utils.parseEther("" + parseFloat(amount).toFixed(12)) as any,
         Boolean(callData) ? callData : "0x",
-        hashKey,
+        tokenHashKey !== "false" ? hashKey : "false",
       ],
       address: walletAddress as any,
     } as any);
@@ -130,6 +211,20 @@ const WalletPage: NextPage = () => {
       onExecute(currentPublicKey, hashKey as string);
     }
   }, [currentPublicKey, hashKey]);
+
+  useEffect(() => {
+    if (virtualAddress !== undefined && publicKey !== undefined) {
+      // add signer and provider on mount
+      const provider = new ethers.providers.JsonRpcProvider(
+        scaffoldConfig.targetNetworks[0].rpcUrls.default.http[0] as any,
+      );
+
+      const signer = new ethers.Wallet(getPrivateKey(publicKey), provider);
+
+      setSigner(signer);
+      setProvider(provider);
+    }
+  }, [virtualAddress, publicKey]);
 
   return (
     <div className="">
@@ -169,7 +264,14 @@ const WalletPage: NextPage = () => {
       <div role="tablist" className="tabs tabs-lifted lg:mx-8">
         <input type="radio" name="my_tabs_2" role="tab" className="tab" aria-label="Impersonator" checked />
         <div role="tabpanel" className="tab-content bg-base-100 border-base-300 rounded-box p-6">
-          <Impersonator walletAddress={walletAddress} tokenId={tokenId} tokenHashKey={tokenHashKey} />
+          <Impersonator
+            walletAddress={walletAddress}
+            tokenId={tokenId}
+            tokenHashKey={tokenHashKey}
+            provider={provider}
+            signer={signer}
+            publicKey={publicKey}
+          />
         </div>
 
         <input type="radio" name="my_tabs_2" role="tab" className="tab" aria-label="Address Vision" />

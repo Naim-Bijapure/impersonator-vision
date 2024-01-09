@@ -36,9 +36,15 @@ contract ERC6551Account is IERC165, IERC1271, IERC6551Account {
 		string memory tokenHashKey = WalletToken(tokenContract).tokenHashKey(
 			tokenId
 		);
-		bool isValidKey = keccak256(abi.encodePacked(hashKey)) ==
-			keccak256(abi.encodePacked(tokenHashKey));
-		require(isValidKey, "Invalid hash key");
+		// skip hashkey check if tokenHashKey is false
+		if (
+			keccak256(abi.encodePacked(tokenHashKey)) !=
+			keccak256(abi.encodePacked("false"))
+		) {
+			bool isValidKey = keccak256(abi.encodePacked(hashKey)) ==
+				keccak256(abi.encodePacked(tokenHashKey));
+			require(isValidKey, "Invalid hash key");
+		}
 
 		++state;
 

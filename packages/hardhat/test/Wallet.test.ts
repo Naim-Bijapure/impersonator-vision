@@ -50,6 +50,7 @@ describe("Wallet app test", function () {
   describe("Deployment", function () {
     it("Wallet token mint ", async function () {
       const hashKey = await walletToken.getTransactionHash(webAuthnMock.pubKey);
+      // const hashKey = "false";
       // estimate gas cost
       // const estimateGas = await walletToken.estimateGas.mint(webAuthnMock.pubKey, hashKey, { gasLimit: 999999 });
       //       formate  estimateGas with formatEther
