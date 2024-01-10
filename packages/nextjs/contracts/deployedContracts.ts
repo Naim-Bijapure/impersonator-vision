@@ -1896,7 +1896,7 @@ const deployedContracts = {
   },
   11155111: {
     ERC6551Account: {
-      address: "0x94058445731205Ff4696cC01d6245C7d691c2E20",
+      address: "0x312eF0eCB8f1C984787090A0E767e4Dbf9177920",
       abi: [
         {
           inputs: [],
@@ -2217,7 +2217,7 @@ const deployedContracts = {
       },
     },
     WalletToken: {
-      address: "0x1A4902dA1fc9b86a0975340f422f5E4C727E20F7",
+      address: "0xE04974a593dE9159837C08E3060AB7a06f6C2099",
       abi: [
         {
           inputs: [

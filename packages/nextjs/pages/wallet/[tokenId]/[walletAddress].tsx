@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/router";
-import { bufferToBase64URLString, startAuthentication } from "@simplewebauthn/browser";
-import { ethers } from "ethers";
+import { startAuthentication } from "@simplewebauthn/browser";
 import { NextPage } from "next";
 import { QRCodeSVG } from "qrcode.react";
 import toast from "react-hot-toast";
@@ -13,59 +12,63 @@ import {
 import { AddressVisionImpersonator } from "~~/components/AddressVisionImpersonator";
 import { Impersonator } from "~~/components/Impersonator";
 import { Address, AddressInput, Balance, EtherInput, InputBase } from "~~/components/scaffold-eth";
-import { useScaffoldContractRead, useScaffoldContractWrite } from "~~/hooks/scaffold-eth";
-import { ERC6551Account, TxnNotification, WalletToken, getPrivateKey } from "~~/pages";
-import scaffoldConfig from "~~/scaffold.config";
+import { useScaffoldContractRead } from "~~/hooks/scaffold-eth";
+import { TxnNotification } from "~~/pages";
+import { BASE_URL } from "~~/utils/constants";
 import { notification } from "~~/utils/scaffold-eth";
 
 const WalletPage: NextPage = () => {
+  // const socket = useGlobalState(state => state.socket);
+
   const { isConnected } = useAccount();
 
   const router = useRouter();
   const { tokenId, walletAddress } = router.query;
 
-  const [signer, setSigner] = useState<any>(undefined);
-  const [provider, setProvider] = useState<any>(undefined);
-
   const [recipient, setRecipent] = useState<string>("");
   const [amount, setAmount] = useState<string>("");
   const [callData, setCallData] = useState<string>("");
-  const [currentPublicKey, setCurrentPublicKey] = useState("");
+  // const [currentPublicKey, setCurrentPublicKey] = useState("");
 
   let walletWebAuthData: any;
-  let virtualAddress: any;
+  // let virtualAddress: any;
   let publicKey: any;
+  let userName: any;
+  let aaguid: any;
   if (typeof window !== "undefined") {
     walletWebAuthData = JSON.parse(localStorage.getItem("walletWebAuthData") || "{}");
-    virtualAddress = JSON.parse(localStorage.getItem("virtualAddress") || "");
+    // virtualAddress = JSON.parse(localStorage.getItem("virtualAddress") || "");
     publicKey = JSON.parse(localStorage.getItem("publicKey") || "");
+    userName = JSON.parse(localStorage.getItem("userName") || "");
+    aaguid = JSON.parse(localStorage.getItem("aaguid") || "");
+
     if (isConnected) {
       walletWebAuthData = walletWebAuthData[tokenId as string];
     }
   }
 
-  const { data: hashKey } = useScaffoldContractRead({
-    contractName: "WalletToken",
-    functionName: "getTransactionHash",
-    args: [currentPublicKey],
-  });
+  // const { data: hashKey } = useScaffoldContractRead({
+  //   contractName: "WalletToken",
+  //   functionName: "getTransactionHash",
+  //   args: [currentPublicKey],
+  // });
 
   const { data: tokenHashKey } = useScaffoldContractRead({
     contractName: "WalletToken",
     functionName: "tokenHashKey",
     args: [BigInt(tokenId ? +tokenId : 0)],
   });
-  const { writeAsync: writeAsyncExecute } = useScaffoldContractWrite({
-    contractName: "ERC6551Account",
-    functionName: "execute",
-    args: [] as any,
-  });
+  // const { writeAsync: writeAsyncExecute } = useScaffoldContractWrite({
+  //   contractName: "ERC6551Account",
+  //   functionName: "execute",
+  //   args: [] as any,
+  // });
 
   const onWebAuthTx = async () => {
     const toastId = toast.loading("Executing transaction");
     try {
       // generate auth data
-      const response = await fetch("/api/generateAuth", {
+      const response = await fetch(BASE_URL + "/generate-auth", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -84,7 +87,7 @@ const WalletPage: NextPage = () => {
       const authResponse = await startAuthentication(authData.options);
 
       // verify auth
-      const verifyResponse = await fetch("/api/verifyAuth", {
+      const verifyResponse = await fetch(BASE_URL + "/verify-auth", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -96,7 +99,7 @@ const WalletPage: NextPage = () => {
           authResponse,
           expectedChallenge: authData.options.challenge,
           expectedOrigin: window.location.origin,
-          authenticator: walletWebAuthData,
+          authenticator: walletWebAuthData[userName],
         }),
       });
 
@@ -107,14 +110,13 @@ const WalletPage: NextPage = () => {
       const verifyData = await verifyResponse.json();
       if (tokenHashKey !== "false" && isConnected && verifyData.verification.verified) {
         // get a public key string
-        const pubKeyStr = bufferToBase64URLString(
-          new Uint8Array(Object.values(walletWebAuthData.credentialPublicKey) as any),
-        );
-
-        setCurrentPublicKey(pubKeyStr);
+        // const pubKeyStr = bufferToBase64URLString(
+        //   new Uint8Array(Object.values(walletWebAuthData.credentialPublicKey) as any),
+        // );
+        // setCurrentPublicKey(pubKeyStr);
       }
       if (tokenHashKey === "false" && isConnected && verifyData.verification.verified) {
-        setCurrentPublicKey(tokenHashKey);
+        // setCurrentPublicKey(tokenHashKey);
       }
 
       // on sign in pass key flow
@@ -122,61 +124,47 @@ const WalletPage: NextPage = () => {
         // const pubKey = bufferToBase64URLString(
         //   new Uint8Array(Object.values(walletWebAuthData.credentialPublicKey) as any),
         // );
+        const walletResponse = await fetch(BASE_URL + "/execute", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            pubKey: publicKey[userName],
+            userName,
+            aaguid,
+            tokenId,
+            recipient,
+            amount,
+            callData: Boolean(callData) ? callData : "0x",
+          }),
+        });
+        if (!walletResponse.ok) {
+          toast.dismiss(toastId);
+          toast.error("Error in tx execution");
+          throw new Error(`HTTP error! status: ${walletResponse.status}`);
+        }
+        toast.dismiss(toastId);
+        const walletData = await walletResponse.json();
+        const { status, blockUrl } = walletData;
 
-        // const walletResponse = await fetch("/api/wallet", {
-        //   method: "POST",
-        //   headers: {
-        //     "Content-Type": "application/json",
-        //   },
-        //   body: JSON.stringify({
-        //     type: WALLET_TYPES.EXECUTE,
-        //     pubKey: pubKey,
-        //     amount,
-        //     tokenId: tokenId,
-        //     callData: Boolean(callData) ? callData : "0x",
-        //   }),
-        // });
-        // if (!walletResponse.ok) {
-        //   toast.dismiss(toastId);
-        //   toast.error("Error in tx execution");
-        //   throw new Error(`HTTP error! status: ${walletResponse.status}`);
-        // }
-
-        // toast.dismiss(toastId);
-        // const walletData = await walletResponse.json();
-        // notification.success(<TxnNotification message="Tx executed at" blockExplorerLink={walletData.blockUrl} />);
-        // (document.getElementById("sentModal") as any)?.close();
-
-        // FE EXECUTION
-
-        const walletToken = new ethers.Contract(WalletToken.address, WalletToken.abi, signer);
-
-        const boundWalletAddress = await walletToken.tokenBoundWalletAddress(tokenId);
-
-        const boundWallet = new ethers.Contract(boundWalletAddress, ERC6551Account.abi, signer);
-        const boundWalletBalance = await provider.getBalance(boundWallet.address);
-        if (boundWalletBalance.gt(0) === false) {
-          notification.error("Wallet balance is 0");
+        if (status) {
+          notification.success(<TxnNotification message="Tx executed at" blockExplorerLink={blockUrl} />);
+        } else {
+          notification.error("Transaction failed");
         }
 
-        const hashKey = await walletToken.getTransactionHash(publicKey);
+        (document.getElementById("sentModal") as any)?.close();
 
-        const executeTx = await boundWallet.execute(
-          recipient,
-          ethers.utils.parseEther("" + parseFloat(amount).toFixed(12)) as any,
-          Boolean(callData) ? callData : "0x",
-          hashKey,
-          {
-            gasLimit: 999999,
-          },
-        );
-        const executeRcpt = await executeTx.wait();
-        const network = await provider.getNetwork();
-        const networkName = network.name === "homestead" ? "mainnet" : network.name;
-
-        const blockUrl = `https://${networkName}.etherscan.io/tx/${executeRcpt.transactionHash}`;
-        toast.dismiss(toastId);
-        notification.success(<TxnNotification message="Tx executed at" blockExplorerLink={blockUrl} />);
+        // socket.emit("executeWallet", {
+        //   pubKey: publicKey,
+        //   userName,
+        //   aaguid,
+        //   tokenId,
+        //   recipient,
+        //   amount,
+        //   callData: Boolean(callData) ? callData : "0x",
+        // });
       }
     } catch (error) {
       toast.dismiss(toastId);
@@ -184,47 +172,76 @@ const WalletPage: NextPage = () => {
     }
   };
 
-  const onExecute = async (currentPublicKey: string, hashKey: string) => {
-    if (hashKey !== tokenHashKey && tokenHashKey !== "false") {
-      toast.error("authentication failed");
-      return;
-    }
+  // const onExecute = async (currentPublicKey: string, hashKey: string) => {
+  //   if (hashKey !== tokenHashKey && tokenHashKey !== "false") {
+  //     toast.error("authentication failed");
+  //     return;
+  //   }
 
-    // EXECUTE
-    await writeAsyncExecute({
-      args: [
-        recipient,
-        ethers.utils.parseEther("" + parseFloat(amount).toFixed(12)) as any,
-        Boolean(callData) ? callData : "0x",
-        tokenHashKey !== "false" ? hashKey : "false",
-      ],
-      address: walletAddress as any,
-    } as any);
-    (document.getElementById("sentModal") as any)?.close();
-    setRecipent("");
-    setAmount("");
-    setCurrentPublicKey("");
-  };
+  //   // EXECUTE
+  //   await writeAsyncExecute({
+  //     args: [
+  //       recipient,
+  //       ethers.utils.parseEther("" + parseFloat(amount).toFixed(12)) as any,
+  //       Boolean(callData) ? callData : "0x",
+  //       tokenHashKey !== "false" ? hashKey : "false",
+  //     ],
+  //     address: walletAddress as any,
+  //   } as any);
+  //   (document.getElementById("sentModal") as any)?.close();
+  //   setRecipent("");
+  //   setAmount("");
+  //   setCurrentPublicKey("");
+  // };
 
-  useEffect(() => {
-    if (currentPublicKey !== "" && hashKey !== undefined) {
-      onExecute(currentPublicKey, hashKey as string);
-    }
-  }, [currentPublicKey, hashKey]);
+  // useEffect(() => {
+  //   if (currentPublicKey !== "" && hashKey !== undefined) {
+  //     onExecute(currentPublicKey, hashKey as string);
+  //   }
+  // }, [currentPublicKey, hashKey]);
 
-  useEffect(() => {
-    if (virtualAddress !== undefined && publicKey !== undefined) {
-      // add signer and provider on mount
-      const provider = new ethers.providers.JsonRpcProvider(
-        scaffoldConfig.targetNetworks[0].rpcUrls.default.http[0] as any,
-      );
+  // useEffect(() => {
+  //   if (virtualAddress !== undefined && publicKey !== undefined) {
+  //     // add signer and provider on mount
+  //     const provider = new ethers.providers.JsonRpcProvider(
+  //       scaffoldConfig.targetNetworks[0].rpcUrls.default.http[0] as any,
+  //     );
 
-      const signer = new ethers.Wallet(getPrivateKey(publicKey), provider);
+  //     const signer = new ethers.Wallet(getPrivateKey(publicKey), provider);
 
-      setSigner(signer);
-      setProvider(provider);
-    }
-  }, [virtualAddress, publicKey]);
+  //     setSigner(signer);
+  //     setProvider(provider);
+  //   }
+  // }, [virtualAddress, publicKey]);
+
+  // useEffect(() => {
+  //   // n-socket
+  //   if (socket.connected) {
+  //     console.log("Socket is connected");
+  //   } else {
+  //     console.log("Socket is not connected");
+  //   }
+
+  //   socket.on("emptyBalance", data => {
+  //     toast.dismiss();
+  //     notification.error("Not sufficient balance");
+  //   });
+
+  //   socket.on("setMinting", data => {
+  //     const { blockUrl } = data;
+  //     toast.dismiss();
+  //     notification.success(
+  //       <TxnNotification message="Waiting for transaction to complete." blockExplorerLink={blockUrl} />,
+  //     );
+  //   });
+
+  //   socket.on("setMinted", data => {
+  //     const { blockUrl } = data;
+  //     toast.dismiss();
+  //     notification.success(<TxnNotification message="Transaction completed at." blockExplorerLink={blockUrl} />);
+  //     socket.emit("getWallets", { userName });
+  //   });
+  // }, []);
 
   return (
     <div className="">
@@ -237,7 +254,7 @@ const WalletPage: NextPage = () => {
         ></QRCodeSVG>
 
         <div className="m-2">
-          {/* <div className="ml-2">Token id - {token.tokenId}</div> */}
+          <div className="ml-2 text-success"> {userName}</div>
           <div className="ml-2">
             <Address address={walletAddress as string} disableAddressLink />
           </div>
@@ -268,9 +285,9 @@ const WalletPage: NextPage = () => {
             walletAddress={walletAddress}
             tokenId={tokenId}
             tokenHashKey={tokenHashKey}
-            provider={provider}
-            signer={signer}
             publicKey={publicKey}
+            userName={userName}
+            aaguid={aaguid}
           />
         </div>
 
@@ -347,6 +364,5 @@ const WalletPage: NextPage = () => {
     </div>
   );
 };
-
 
 export default WalletPage;

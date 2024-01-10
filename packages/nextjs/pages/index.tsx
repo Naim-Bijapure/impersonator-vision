@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Address, Balance } from "../components/scaffold-eth";
+import { Address, Balance, InputBase } from "../components/scaffold-eth";
 import { bufferToBase64URLString, startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import crypto from "crypto";
-import { ethers } from "ethers";
 import type { NextPage } from "next";
 import { QRCodeSVG } from "qrcode.react";
 import toast from "react-hot-toast";
@@ -13,6 +12,7 @@ import { MetaHeader } from "~~/components/MetaHeader";
 import deployedContracts from "~~/contracts/deployedContracts";
 import { useScaffoldContractRead, useScaffoldContractWrite, useScaffoldEventHistory } from "~~/hooks/scaffold-eth";
 import scaffoldConfig from "~~/scaffold.config";
+import { BASE_URL } from "~~/utils/constants";
 import { notification } from "~~/utils/scaffold-eth";
 
 export const TxnNotification = ({ message, blockExplorerLink }: { message: string; blockExplorerLink?: string }) => {
@@ -39,19 +39,77 @@ export const getPrivateKey = (pubKey: any) => {
 };
 
 const Home: NextPage = () => {
-  const [mounted, setMounted] = useState(false);
+  // const socket = useGlobalState(state => state.socket);
 
   const { isConnected, address } = useAccount();
   const [currentPublicKey, setCurrentPublicKey] = useState("");
 
   const [isWebAuth, setIsWebAuth] = useState(false);
-  const [signer, setSigner] = useState<any>(undefined);
-  const [provider, setProvider] = useState<any>(undefined);
+  const [sessions, setSessions] = useState([]);
+  // const [userName, setUserName] = useState<any>(undefined);
 
+  // local storage states
   const [walletWebAuthData, setWalletWebAuthData] = useLocalStorage<any>("walletWebAuthData", {});
   const [virtualAddress, setVirtualAddress] = useLocalStorage<any>("virtualAddress", undefined);
+  const [userName, setUserName] = useLocalStorage<any>("userName", undefined);
+
   const [publicKey, setPublicKey] = useLocalStorage<any>("publicKey", undefined);
+
+  const [aaguid, setAaguid] = useLocalStorage<any>("aaguid", undefined);
+
   const [mintedWallets, setMintedWallets] = useLocalStorage<any>("mintedWallets", []);
+
+  // useEffect(() => {
+  //   socket.connect();
+  //   // n-socket
+  //   if (socket.connected) {
+  //     console.log("Socket is connected");
+  //   } else {
+  //     console.log("Socket is not connected");
+  //   }
+
+  //   socket.on("setAccount", data => {
+  //     const { address } = data;
+  //     setVirtualAddress(address);
+  //   });
+
+  //   socket.on("setSessions", data => {
+  //     const { sessions } = data;
+  //     setSessions(sessions);
+  //   });
+  //   if (aaguid !== undefined) {
+  //     socket.emit("getSessions", { aaguid });
+  //   }
+
+  //   socket.on("setWallets", data => {
+  //     const { wallets } = data;
+  //     setMintedWallets(wallets);
+  //   });
+
+  //   if (aaguid !== undefined && userName !== undefined) {
+  //     socket.emit("getWallets", { userName });
+  //   }
+
+  //   socket.on("emptyBalance", data => {
+  //     toast.dismiss();
+  //     notification.error("Not sufficient balance");
+  //   });
+
+  //   socket.on("setMinting", data => {
+  //     const { blockUrl } = data;
+  //     toast.dismiss();
+  //     notification.success(
+  //       <TxnNotification message="Waiting for transaction to complete." blockExplorerLink={blockUrl} />,
+  //     );
+  //   });
+
+  //   socket.on("setMinted", data => {
+  //     const { blockUrl } = data;
+  //     toast.dismiss();
+  //     notification.success(<TxnNotification message="Transaction completed at." blockExplorerLink={blockUrl} />);
+  //     socket.emit("getWallets", { userName });
+  //   });
+  // }, []);
 
   // const { data: tokenBalance } = useScaffoldContractRead({
   //   contractName: "WalletToken",
@@ -161,30 +219,8 @@ const Home: NextPage = () => {
   const onMintPassKey = async () => {
     const toastId = toast.loading("Executing transaction");
 
-    // const walletResponse = await fetch("/api/wallet", {
-    //   method: "POST",
-    //   headers: {
-    //     "Content-Type": "application/json",
-    //   },
-    //   body: JSON.stringify({
-    //     type: WALLET_TYPES.CREATE_WALLET,
-    //     pubKey: publicKey,
-    //   }),
-    // });
-    // if (!walletResponse.ok) {
-    //   toast.dismiss(toastId);
-    //   notification.error("error in minting");
-    //   return;
-    // }
-
-    // const walletData = await walletResponse.json();
-    // setMintedWallets([...mintedWallets, { tokenId: walletData.tokenId, wallet: walletData.wallet }]);
-
-    // FE MINT
-    // verify the auth
-
     // generate auth data
-    const response = await fetch("/api/generateAuth", {
+    const response = await fetch(BASE_URL + "/generate-auth", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -201,9 +237,8 @@ const Home: NextPage = () => {
 
     const authData = await response.json();
     const authResponse = await startAuthentication(authData.options);
-
     // verify auth
-    const verifyResponse = await fetch("/api/verifyAuth", {
+    const verifyResponse = await fetch(BASE_URL + "/verify-auth", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -215,7 +250,7 @@ const Home: NextPage = () => {
         authResponse,
         expectedChallenge: authData.options.challenge,
         expectedOrigin: window.location.origin,
-        authenticator: walletWebAuthData,
+        authenticator: walletWebAuthData[userName],
       }),
     });
 
@@ -225,26 +260,77 @@ const Home: NextPage = () => {
 
     const verifyData = await verifyResponse.json();
     if (verifyData.verification.verified) {
-      const walletToken = new ethers.Contract(WalletToken.address, WalletToken.abi, signer);
-      let token = await walletToken.tokenID();
-      token = token.toString();
-      // mint a nft wallet
+      const walletResponse = await fetch(BASE_URL + "/mint-wallet", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          pubKey: publicKey[userName],
+          userName,
+          aaguid,
+        }),
+      });
+      if (!walletResponse.ok) {
+        toast.dismiss(toastId);
+        notification.error("error in minting");
+        return;
+      }
+      const walletData = await walletResponse.json();
 
-      const hashKey = await walletToken.getTransactionHash(publicKey);
-      const mintTx = await walletToken.mint(hashKey);
-      const mintReceipt = await mintTx.wait();
-      const boundWalletAddress = await walletToken.tokenBoundWalletAddress(token);
-      const network = await provider.getNetwork();
-      const networkName = network.name === "homestead" ? "mainnet" : network.name;
-      // Construct the block URL
-      const blockUrl = `https://${networkName}.etherscan.io/tx/${mintReceipt.transactionHash}`;
-      setMintedWallets([...mintedWallets, { tokenId: token, wallet: boundWalletAddress }]);
+      const { blockUrl, wallets, status } = walletData;
+      if (status) {
+        notification.success(<TxnNotification message="Transaction completed at." blockExplorerLink={blockUrl} />);
+        setMintedWallets(wallets);
+      } else {
+        notification.error("Error in minting");
+      }
+
       toast.dismiss(toastId);
-      notification.success(<TxnNotification message="Tx executed at" blockExplorerLink={blockUrl} />);
+      // socket.emit("mintWallet", { pubKey: publicKey, userName, aaguid });
     } else {
       toast.dismiss(toastId);
       notification.error("error in verification");
     }
+  };
+
+  const loadSessions = async () => {
+    const response = await fetch(BASE_URL + "/sessions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        aaguid,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const { sessions } = data;
+    setSessions(sessions);
+  };
+  const loadWallets = async () => {
+    const response = await fetch(BASE_URL + "/wallets", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        userName,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const { wallets } = data;
+    setMintedWallets(wallets);
   };
 
   const onSignIn = async () => {
@@ -252,7 +338,7 @@ const Home: NextPage = () => {
     try {
       let pubKeyStr = "";
       // generate options
-      const response = await fetch("/api/generateAuth", {
+      const response = await fetch(BASE_URL + "/generate-auth", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -260,8 +346,8 @@ const Home: NextPage = () => {
         body: JSON.stringify({
           type: "register",
           rpID: window.location.hostname,
-          userID: `default-id`,
-          userName: `nft-bound-wallet`,
+          userID: `${userName}`,
+          userName: userName,
         }),
       });
 
@@ -273,7 +359,7 @@ const Home: NextPage = () => {
       // register
       const authResponse = await startRegistration(registerData.options);
       // verify registration
-      const verifyResponse = await fetch("/api/verifyAuth", {
+      const verifyResponse = await fetch(BASE_URL + "/verify-auth", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -291,48 +377,44 @@ const Home: NextPage = () => {
 
       if (verifyResponseData.verification.verified) {
         // setCurrentPublicKey(authResponse.response.publicKey as string);
-        const { credentialPublicKey, credentialID, counter } = verifyResponseData.verification.registrationInfo;
+        const { credentialPublicKey, credentialID, counter, aaguid } = verifyResponseData.verification.registrationInfo;
         const currentWalletAuthData = {
           credentialPublicKey: credentialPublicKey,
           credentialID: credentialID,
           counter,
           transports: authResponse.response.transports,
         };
-        setWalletWebAuthData({ ...currentWalletAuthData } as any);
+        setWalletWebAuthData({ ...walletWebAuthData, [userName]: { ...currentWalletAuthData } } as any);
 
         pubKeyStr = bufferToBase64URLString(
           new Uint8Array(Object.values(currentWalletAuthData.credentialPublicKey) as any),
         );
-        setPublicKey(pubKeyStr as string);
+        setPublicKey({ ...publicKey, [userName]: pubKeyStr as string });
+        setAaguid(aaguid);
 
-        // const walletResponse = await fetch("/api/wallet", {
-        //   method: "POST",
-        //   headers: {
-        //     "Content-Type": "application/json",
-        //   },
-        //   body: JSON.stringify({
-        //     type: WALLET_TYPES.ACCOUNT,
-        //     pubKey: pubKeyStr,
-        //   }),
-        // });
-        // if (!walletResponse.ok) {
-        //   toast.dismiss(toastId);
-        //   throw new Error(`HTTP error! status: ${walletResponse.status}`);
-        // }
+        const walletResponse = await fetch(BASE_URL + "/sign-in", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            pubKey: pubKeyStr,
+            userName,
+            aaguid,
+          }),
+        });
+        if (!walletResponse.ok) {
+          toast.dismiss(toastId);
+          throw new Error(`HTTP error! status: ${walletResponse.status}`);
+        }
 
-        // const walletData = await walletResponse.json();
+        const walletData = await walletResponse.json();
+        const { status, address } = walletData;
+        if (status) {
+          setVirtualAddress(address);
+        }
 
-        // CREATE A WALLET FE OPERATIONS
-        const provider = new ethers.providers.JsonRpcProvider(
-          scaffoldConfig.targetNetworks[0].rpcUrls.default.http[0] as any,
-        );
-
-        // generate a private key
-        const signer = new ethers.Wallet(getPrivateKey(pubKeyStr), provider);
-        // mint an token
-        // const walletToken = new ethers.Contract(WalletToken.address, WalletToken.abi, signer);
-
-        setVirtualAddress(signer.address);
+        // socket.emit("getAccount", { pubKey: pubKeyStr, aaguid, userName });
       } else {
         toast.dismiss(toastId);
         toast.error("Error in registration");
@@ -362,24 +444,12 @@ const Home: NextPage = () => {
     });
 
   useEffect(() => {
-    if (virtualAddress !== undefined && publicKey !== undefined) {
-      // add signer and provider on mount
-      const provider = new ethers.providers.JsonRpcProvider(
-        scaffoldConfig.targetNetworks[0].rpcUrls.default.http[0] as any,
-      );
+    loadSessions();
 
-      const signer = new ethers.Wallet(getPrivateKey(publicKey), provider);
-
-      setSigner(signer);
-      setProvider(provider);
+    if (userName) {
+      loadWallets();
     }
-  }, [virtualAddress, publicKey]);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted) return <></>;
+  }, [virtualAddress, userName]);
 
   return (
     <>
@@ -388,19 +458,74 @@ const Home: NextPage = () => {
         {isConnected === false && (
           <>
             {virtualAddress === undefined && (
-              <div>
-                <button className="btn btn-primary" onClick={onSignIn}>
-                  Sing in with pass key
+              <div className="flex flex-col items-center">
+                <div className="my-2">
+                  <InputBase
+                    value={userName}
+                    placeholder="Enter sign in username"
+                    onChange={value => {
+                      setUserName(value);
+                    }}
+                  />
+                </div>
+                <button className="btn btn-primary" onClick={onSignIn} disabled={!userName}>
+                  Sign in with pass key
                 </button>
+                <div className="my-2">Your previous sessions</div>
+                <div>
+                  {sessions?.map((item: any) => (
+                    <div key={item.userName} className="card bg-base-100 shadow-xl w-full m-2">
+                      <div>
+                        <div className="card-body">
+                          <div className="flex flex-col lg:flex-row justify-start items-center">
+                            <QRCodeSVG
+                              className="rounded-2xl w-50 lg:w-auto mb-4 lg:mb-0"
+                              size={100}
+                              value={item.address as string}
+                            ></QRCodeSVG>
+
+                            <div className="m-2 flex flex-col items-center">
+                              <div className="ml-2"> {item.userName}</div>
+                              <div className="ml-2">
+                                <Address address={item.address} disableAddressLink />
+                              </div>
+                              <Balance address={item.address} />
+                            </div>
+                          </div>
+
+                          <div className="card-actions justify-end">
+                            {/* <button className="btn btn-primary">View</button> */}
+                            {/* <Link href={`/wallet/${token.tokenId}/${token.wallet}`}>
+                              <button className="btn btn-primary">View</button>
+                            </Link> */}
+
+                            <button
+                              className="btn btn-primary"
+                              onClick={() => {
+                                setVirtualAddress(item.address);
+                                setUserName(item.userName);
+                              }}
+                            >
+                              Sign in
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
-            {virtualAddress !== undefined && (
+            {virtualAddress !== undefined && userName !== undefined && (
               // WALLET ADDRESS
 
               <>
-                <div className="flex flex-col items-center self-end">
-                  <div className="text-xs text-success self-end">Virtual wallet</div>
+                <div className="flex flex-col justify-center items-center self-end">
+                  <div className="flex justify-between  w-full">
+                    <div className="text-xs text-success ">{userName}</div>
+                    <div className="text-xs text-success ">Virtual wallet</div>
+                  </div>
 
                   <div className="flex items-center  border-2  rounded-md ">
                     <div className="flex flex-col items-center">

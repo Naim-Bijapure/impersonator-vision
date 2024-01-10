@@ -1,10 +1,11 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/router";
+// import { FaucetButton } from "~~/components/scaffold-eth";
+import { useLocalStorage } from "usehooks-ts";
 import { Bars3Icon, BugAntIcon } from "@heroicons/react/24/outline";
-// import { FaucetButton, RainbowKitCustomConnectButton } from "~~/components/scaffold-eth";
-import { FaucetButton } from "~~/components/scaffold-eth";
+import { FaucetButton, RainbowKitCustomConnectButton } from "~~/components/scaffold-eth";
 import { useOutsideClick } from "~~/hooks/scaffold-eth";
 
 type HeaderMenuLink = {
@@ -56,12 +57,22 @@ export const HeaderMenuLinks = () => {
  */
 export const Header = () => {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
   const burgerMenuRef = useRef<HTMLDivElement>(null);
   useOutsideClick(
     burgerMenuRef,
     useCallback(() => setIsDrawerOpen(false), []),
   );
 
+  const [virtualAddress, setVirtualAddress] = useLocalStorage<any>("virtualAddress", undefined);
+  const [userName, setUserName] = useLocalStorage<any>("userName", undefined);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return <></>;
   return (
     <div className="sticky lg:static top-0 navbar bg-base-100 min-h-0 flex-shrink-0 justify-between z-20 shadow-md shadow-secondary px-0 sm:px-2">
       <div className="navbar-start w-auto lg:w-1/2">
@@ -101,7 +112,20 @@ export const Header = () => {
         </ul>
       </div>
       <div className="navbar-end flex-grow mr-4">
-        {/* <RainbowKitCustomConnectButton /> */}
+        <RainbowKitCustomConnectButton />
+        {virtualAddress !== undefined && userName !== undefined && (
+          <Link href={`/`}>
+            <button
+              className="btn btn-primary btn-outline"
+              onClick={() => {
+                setVirtualAddress(undefined);
+                setUserName(undefined);
+              }}
+            >
+              Logout
+            </button>
+          </Link>
+        )}
         <FaucetButton />
       </div>
     </div>

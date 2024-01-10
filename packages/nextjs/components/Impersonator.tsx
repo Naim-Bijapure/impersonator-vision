@@ -6,12 +6,13 @@ import { bufferToBase64URLString, startAuthentication } from "@simplewebauthn/br
 import { ethers } from "ethers";
 import toast from "react-hot-toast";
 import { useDebounce } from "usehooks-ts";
-import { hardhat } from "viem/chains";
 import { useAccount } from "wagmi";
 import { useScaffoldContractRead, useScaffoldContractWrite } from "~~/hooks/scaffold-eth";
 import { useTargetNetwork } from "~~/hooks/scaffold-eth/useTargetNetwork";
-import { ERC6551Account, TxnNotification, WalletToken } from "~~/pages";
+import { TxnNotification } from "~~/pages";
+import { BASE_URL } from "~~/utils/constants";
 import { notification } from "~~/utils/scaffold-eth";
+import { hardhat } from "viem/chains";
 
 /**
  * Site footer
@@ -20,16 +21,16 @@ export const Impersonator = ({
   walletAddress,
   tokenId,
   tokenHashKey,
-  provider,
-  signer,
   publicKey,
+  userName,
+  aaguid,
 }: {
   walletAddress: any;
   tokenId: any;
   tokenHashKey: any;
-  provider?: any;
-  signer?: any;
   publicKey?: any;
+  userName?: any;
+  aaguid?: any;
 }) => {
   const { isConnected } = useAccount();
   let walletWebAuthData: any;
@@ -82,14 +83,14 @@ export const Impersonator = ({
       return;
     }
     await onImpersonatorExecute({ ...txData, hashKey });
-    (document.getElementById("sentModal") as any)?.close();
+    (document.getElementById("confirmTxWallet") as any)?.close();
   };
 
   const onWebAuthTx = async () => {
     const toastId = toast.loading("Executing transaction");
     try {
       // generate auth data
-      const response = await fetch("/api/generateAuth", {
+      const response = await fetch(BASE_URL + "/generate-auth", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -108,7 +109,7 @@ export const Impersonator = ({
       const authResponse = await startAuthentication(authData.options);
 
       // verify auth
-      const verifyResponse = await fetch("/api/verifyAuth", {
+      const verifyResponse = await fetch(BASE_URL + "/verify-auth", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -120,7 +121,7 @@ export const Impersonator = ({
           authResponse,
           expectedChallenge: authData.options.challenge,
           expectedOrigin: window.location.origin,
-          authenticator: walletWebAuthData,
+          authenticator: walletWebAuthData[userName],
         }),
       });
 
@@ -149,59 +150,46 @@ export const Impersonator = ({
 
         const amount = ethers.utils.formatEther(String(txData?.value));
 
-        // const walletResponse = await fetch("/api/wallet", {
-        //   method: "POST",
-        //   headers: {
-        //     "Content-Type": "application/json",
-        //   },
-        //   body: JSON.stringify({
-        //     type: WALLET_TYPES.EXECUTE,
-        //     pubKey: pubKey,
-        //     tokenId: tokenId,
-        //     amount,
-        //     callData: Boolean(txData?.callData) ? txData?.callData : "0x",
-        //   }),
-        // });
+        const walletResponse = await fetch(BASE_URL + "/execute", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            pubKey: publicKey[userName],
+            userName,
+            aaguid,
+            tokenId,
+            recipient: txData?.to,
+            amount,
+            callData: Boolean(txData?.callData) ? txData?.callData : "0x",
+          }),
+        });
+        if (!walletResponse.ok) {
+          toast.dismiss(toastId);
+          toast.error("Error in tx execution");
+        }
+        toast.dismiss(toastId);
+        const walletData = await walletResponse.json();
+        const { status, blockUrl } = walletData;
 
-        // toast.dismiss(toastId);
-        // if (!walletResponse.ok) {
-        //   toast.error("Error in tx execution");
-        //   throw new Error(`HTTP error! status: ${walletResponse.status}`);
-        // }
-        // const walletData = await walletResponse.json();
-        // toast.success("Tx successfully executed");
-
-        // notification.success(<TxnNotification message="Tx executed at" blockExplorerLink={walletData.blockUrl} />);
-
-        // (document.getElementById("sentModal") as any)?.close();
-
-        // FE EXECUTION
-        const walletToken = new ethers.Contract(WalletToken.address, WalletToken.abi, signer);
-        const boundWalletAddress = await walletToken.tokenBoundWalletAddress(tokenId);
-        const boundWallet = new ethers.Contract(boundWalletAddress, ERC6551Account.abi, signer);
-        const boundWalletBalance = await provider.getBalance(boundWallet.address);
-        if (boundWalletBalance.gt(0) === false) {
-          notification.error("Wallet balance is 0");
+        if (status) {
+          notification.success(<TxnNotification message="Tx executed at" blockExplorerLink={blockUrl} />);
+        } else {
+          notification.error("Transaction failed");
         }
 
-        const hashKey = await walletToken.getTransactionHash(publicKey);
+        (document.getElementById("confirmTxWallet") as any)?.close();
 
-        const executeTx = await boundWallet.execute(
-          txData?.to,
-          ethers.utils.parseEther("" + parseFloat(amount).toFixed(12)) as any,
-          Boolean(txData?.callData) ? txData?.callData : "0x",
-          hashKey,
-          {
-            gasLimit: 999999,
-          },
-        );
-        const executeRcpt = await executeTx.wait();
-        const network = await provider.getNetwork();
-        const networkName = network.name === "homestead" ? "mainnet" : network.name;
-
-        const blockUrl = `https://${networkName}.etherscan.io/tx/${executeRcpt.transactionHash}`;
-        toast.dismiss(toastId);
-        notification.success(<TxnNotification message="Tx executed at" blockExplorerLink={blockUrl} />);
+        // socket.emit("executeWallet", {
+        //   pubKey: publicKey,
+        //   userName,
+        //   aaguid,
+        //   tokenId,
+        //   recipient: txData?.to,
+        //   amount,
+        //   callData: Boolean(txData?.callData) ? txData?.callData : "0x",
+        // });
       }
     } catch (error) {
       toast.dismiss(toastId);
@@ -232,6 +220,36 @@ export const Impersonator = ({
       (document.getElementById("confirmTxWallet") as any)?.showModal();
     }
   }, [latestTransaction]);
+
+  // const socket = useGlobalState(state => state.socket);
+  // useEffect(() => {
+  //   // n-socket
+  //   if (socket.connected) {
+  //     console.log("Socket is connected");
+  //   } else {
+  //     console.log("Socket is not connected");
+  //   }
+
+  //   socket.on("emptyBalance", data => {
+  //     toast.dismiss();
+  //     notification.error("Not sufficient balance");
+  //   });
+
+  //   socket.on("setMinting", data => {
+  //     const { blockUrl } = data;
+  //     toast.dismiss();
+  //     notification.success(
+  //       <TxnNotification message="Waiting for transaction to complete." blockExplorerLink={blockUrl} />,
+  //     );
+  //   });
+
+  //   socket.on("setMinted", data => {
+  //     const { blockUrl } = data;
+  //     toast.dismiss();
+  //     notification.success(<TxnNotification message="Transaction completed at." blockExplorerLink={blockUrl} />);
+  //     socket.emit("getWallets", { userName });
+  //   });
+  // }, []);
 
   return (
     <div className="flex flex-col items-center">

@@ -17,6 +17,7 @@ import { appChains } from "~~/services/web3/wagmiConnectors";
 import "~~/styles/globals.css";
 
 const ScaffoldEthApp = ({ Component, pageProps }: AppProps) => {
+  const [mounted, setMounted] = useState(false);
   const price = useNativeCurrencyPrice();
   const setNativeCurrencyPrice = useGlobalState(state => state.setNativeCurrencyPrice);
 
@@ -25,6 +26,12 @@ const ScaffoldEthApp = ({ Component, pageProps }: AppProps) => {
       setNativeCurrencyPrice(price);
     }
   }, [setNativeCurrencyPrice, price]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return <></>;
 
   return (
     <>
